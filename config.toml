@@ -1,0 +1,15 @@
+title = "Crystal Detection"
+
+[model]
+    checkpoint_path = "./model/FastSAM-x.pt"
+    confidence_threshold = 0.5
+    iou_threshold = 0.9
+    show_detection = true
+    save_detection = false
+
+[storage] # Requires double backslashes or forward slashes
+    data_folder = "./data/test_crystal_capture"
+    output_folder = "./output"
+
+[logging]
+    log_level = "INFO"
