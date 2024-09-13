@@ -3,7 +3,6 @@ import os
 from glob import glob
 from tkinter import *
 from tkinter import filedialog, messagebox, ttk
-from typing import List
 
 import cv2
 import matplotlib.pyplot as plt
@@ -12,6 +11,7 @@ import pandas as pd
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 from numpy.typing import ArrayLike
+from scipy.stats import norm
 
 from helpers import draw_bboxes, load_config, select_roi
 from model import get_filtered_boxes, get_model
@@ -81,6 +81,7 @@ class DetectCrystals:
         self.show_detection = BooleanVar()
         self.save_detection = BooleanVar()
         self.progress = IntVar()
+        self.progress_text = StringVar()
 
         self.data_folder.set(self.config["storage"]["data_folder"])
         self.output_folder.set(self.config["storage"]["output_folder"])
@@ -91,43 +92,34 @@ class DetectCrystals:
         self.show_detection.set(self.config["model"]["show_detection"])
         self.save_detection.set(self.config["model"]["save_detection"])
 
-    def _create_loading_window(self):
+    def _create_loading_window(self, maximum):
         self.loading_window = Toplevel(self.root)
         self.loading_window.title("Detecting Crystals")
         self.loading_window.geometry("300x100")
         self.loading_window.grab_set()
 
+        maximum = maximum or 100
+
         self.progress.set(0)
+        self.progress_text.set("Detecting Crystals...")
 
         self.loading_label = ttk.Label(
-            self.loading_window, text="Detecting Crystals..."
+            self.loading_window, textvariable=self.progress_text
         ).pack()
         self.progress_bar = ttk.Progressbar(
-            self.loading_window, mode="indeterminate", variable=self.progress
+            self.loading_window,
+            mode="determinate",
+            variable=self.progress,
+            maximum=maximum,
         ).pack()
-        self.progress_forward = True
 
         self.loading_window.attributes("-topmost", True)
         self.loading_window.protocol("WM_DELETE_WINDOW", self._on_closing)
-        self.root.update_idletasks()
+        self.root.update()
 
-        self._update_progress()
-
-    def _update_progress(self):
+    def _update_progress(self, step):
         current_progress = self.progress.get()
-        if current_progress is None:
-            current_progress = 0
-        elif current_progress >= 100:
-            self.progress_forward = False
-        elif current_progress <= 0:
-            self.progress_forward = True
-
-        if self.progress_forward:
-            self.progress.set(current_progress + 5)
-        else:
-            self.progress.set(current_progress - 5)
-
-        self.loading_window.after(100, self._update_progress)
+        self.progress.set(current_progress + step)
 
     def _detect_crystals(self):
         if not self.model:
@@ -155,11 +147,13 @@ class DetectCrystals:
             messagebox.showerror("Error", "No region of interest selected. Exiting.")
             return
 
-        self._create_loading_window()
+        self._create_loading_window(len(files))
 
         df_res = pd.DataFrame(columns=["file", "object_counter", "object_area_sum"])
 
         for i, file in enumerate(files):
+            self.progress_text.set(f"Processing file {i+1}/{len(files)}")
+            self.root.update()
             logger.info(f"Processing {file}")
 
             img = cv2.imread(file)
@@ -199,11 +193,31 @@ class DetectCrystals:
                     "object_area_sum": res_boxes["area"].sum(),
                 }
             )
+            df_res = df_res.astype({"object_counter": int, "object_area_sum": int})
+            self._update_progress(1)
 
         self.loading_window.destroy()
 
-        df_res.plot(x="file", y="object_counter", kind="bar")
+        print(df_res)
+        df_res.hist(
+            column="object_counter",
+            bins=df_res["object_counter"].max() + 1,
+            zorder=2,
+            rwidth=0.9,
+        )
+        plt.xlabel("Number of objects")
+        plt.ylabel("Number of frames")
+        plt.title("Number of objects per frame")
+        plt.grid(axis="y", zorder=1)
+
+        mean = df_res["object_counter"].mean()
+        std = df_res["object_counter"].std()
+        x = np.linspace(0, df_res["object_counter"].max(), 100)
+        y = len(df_res) * norm.pdf(x, mean, std)
+        plt.plot(x, y, "r--", linewidth=2)
         plt.show()
+
+        df_res.to_csv(f"{self.data_folder.get()}/results.csv", index=False)
 
     def _show_image(
         self,

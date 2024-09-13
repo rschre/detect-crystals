@@ -1,8 +1,6 @@
 import glob
 import logging
 import os
-from tkinter import Tk
-from typing import List
 
 import cv2
 import numpy as np
